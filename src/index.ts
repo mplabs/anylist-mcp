@@ -65,11 +65,10 @@ app.post("/mcp", async (req, res) => {
 });
 
 app.get("/mcp", (_req, res) => {
-  res.status(405).json({
+  res.status(200).json({
     jsonrpc: "2.0",
-    error: {
-      code: -32000,
-      message: "Method not allowed.",
+    result: {
+      status: "ok",
     },
     id: null,
   });
