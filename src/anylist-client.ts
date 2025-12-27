@@ -1,5 +1,12 @@
 import AnyList from "anylist";
 import { requireEnv, resolveCredentialsFile } from "./config.ts";
+import { SessionCache } from "./session-cache.ts";
+import type {
+  AnyListClient,
+  AnyListList,
+  AnyListMealPlanEvent,
+  AnyListRecipe,
+} from "./types.ts";
 
 function extractUserIdFromToken(token) {
   if (!token || typeof token !== "string") {
@@ -19,7 +26,7 @@ function extractUserIdFromToken(token) {
   }
 }
 
-function patchUid(any, userId) {
+function patchUid(any: AnyListClient, userId: string) {
   any.uid = userId;
   const listGroups = [any.lists, any.favoriteItems];
   for (const group of listGroups) {
@@ -61,7 +68,7 @@ function patchUid(any, userId) {
   }
 }
 
-function findUserIdFromLists(lists) {
+function findUserIdFromLists(lists: AnyListList[] | undefined) {
   for (const list of lists ?? []) {
     for (const item of list.items ?? []) {
       if (item.userId) {
@@ -72,7 +79,7 @@ function findUserIdFromLists(lists) {
   return null;
 }
 
-function findUserIdFromRecent(any) {
+function findUserIdFromRecent(any: AnyListClient) {
   if (!any.recentItems || typeof any.recentItems !== "object") {
     return null;
   }
@@ -89,7 +96,7 @@ function findUserIdFromRecent(any) {
   return null;
 }
 
-async function ensureUserId(any) {
+async function ensureUserId(any: AnyListClient) {
   if (any.uid) {
     return any.uid;
   }
@@ -117,12 +124,31 @@ async function ensureUserId(any) {
   );
 }
 
-const clientState = {
+const clientState: {
+  client: AnyListClient | null;
+  loginPromise: Promise<void> | null;
+} = {
   client: null,
   loginPromise: null,
 };
 
-async function getClient() {
+const DEFAULT_CACHE_TTL_MS = 30_000;
+
+function resolveCacheTtlMs(): number {
+  const raw = process.env.ANYLIST_CACHE_TTL_MS;
+  if (!raw) {
+    return DEFAULT_CACHE_TTL_MS;
+  }
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    return DEFAULT_CACHE_TTL_MS;
+  }
+  return parsed;
+}
+
+const sessionCache = new SessionCache(resolveCacheTtlMs());
+
+async function getClient(): Promise<AnyListClient> {
   requireEnv();
   if (!clientState.client) {
     const credentialsFile = resolveCredentialsFile();
@@ -130,7 +156,7 @@ async function getClient() {
       email: process.env.ANYLIST_EMAIL,
       password: process.env.ANYLIST_PASSWORD,
       credentialsFile,
-    });
+    }) as unknown as AnyListClient;
   }
 
   if (!clientState.loginPromise) {
@@ -144,25 +170,15 @@ async function getClient() {
   return clientState.client;
 }
 
-async function getLists() {
-  const client = await getClient();
-  const lists = await client.getLists();
-  if (client.uid) {
-    patchUid(client, client.uid);
-  }
-  return lists;
+async function getLists(): Promise<AnyListList[]> {
+  return getListsForSession();
 }
 
-async function getRecipes() {
-  const client = await getClient();
-  const recipes = await client.getRecipes();
-  if (client.uid) {
-    patchUid(client, client.uid);
-  }
-  return recipes;
+async function getRecipes(): Promise<AnyListRecipe[]> {
+  return getRecipesForSession();
 }
 
-async function getMealPlanEvents() {
+async function getMealPlanEvents(): Promise<AnyListMealPlanEvent[]> {
   const client = await getClient();
   const events = await client.getMealPlanningCalendarEvents();
   if (client.uid) {
@@ -171,4 +187,53 @@ async function getMealPlanEvents() {
   return events;
 }
 
-export { getClient, getLists, getMealPlanEvents, getRecipes };
+async function getListsForSession(
+  sessionId?: string,
+): Promise<AnyListList[]> {
+  const cached = sessionCache.get<AnyListList[]>(sessionId, "lists");
+  if (cached) {
+    return cached;
+  }
+  const client = await getClient();
+  const lists = await client.getLists();
+  if (client.uid) {
+    patchUid(client, client.uid);
+  }
+  sessionCache.set(sessionId, "lists", lists);
+  return lists;
+}
+
+async function getRecipesForSession(
+  sessionId?: string,
+): Promise<AnyListRecipe[]> {
+  const cached = sessionCache.get<AnyListRecipe[]>(sessionId, "recipes");
+  if (cached) {
+    return cached;
+  }
+  const client = await getClient();
+  const recipes = await client.getRecipes();
+  if (client.uid) {
+    patchUid(client, client.uid);
+  }
+  sessionCache.set(sessionId, "recipes", recipes);
+  return recipes;
+}
+
+function invalidateListsCache(sessionId?: string) {
+  sessionCache.invalidate(sessionId, "lists");
+}
+
+function invalidateRecipesCache(sessionId?: string) {
+  sessionCache.invalidate(sessionId, "recipes");
+}
+
+export {
+  getClient,
+  getLists,
+  getListsForSession,
+  getMealPlanEvents,
+  getRecipes,
+  getRecipesForSession,
+  invalidateListsCache,
+  invalidateRecipesCache,
+};

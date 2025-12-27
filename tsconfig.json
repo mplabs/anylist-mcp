@@ -4,8 +4,10 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "allowImportingTsExtensions": true,
+    "isolatedModules": true,
     "noEmit": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    "types": ["jest", "node"]
   },
   "include": ["src/**/*.ts"]
 }

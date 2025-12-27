@@ -16,14 +16,13 @@ Set environment variables:
 - `ANYLIST_USER_ID` (optional, recommended if you have empty lists)
 - `ANYLIST_CREDENTIALS_FILE` (optional; set to `false` or `null` to disable
   saved credentials)
+- `ANYLIST_CACHE_TTL_MS` (optional; defaults to 30000)
 
 Run the server:
 
 ```bash
 npm start
 ```
-
-Node 23.6+ includes native TypeScript execution.
 
 ## Streamable HTTP
 

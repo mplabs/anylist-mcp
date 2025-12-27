@@ -247,5 +247,6 @@ const schemas = {
   mealPlanLabels: emptySchema,
   createMealPlanEvent: createMealPlanEventSchema,
   deleteMealPlanEvent: deleteMealPlanEventSchema,
-};
+} as const;
+
 export { schemas };

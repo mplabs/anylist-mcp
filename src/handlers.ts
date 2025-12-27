@@ -1,9 +1,11 @@
 import Ingredient from "anylist/lib/ingredient.js";
 import {
   getClient,
-  getLists,
+  getListsForSession,
   getMealPlanEvents,
-  getRecipes,
+  getRecipesForSession,
+  invalidateListsCache,
+  invalidateRecipesCache,
 } from "./anylist-client.ts";
 import {
   serializeItem,
@@ -13,36 +15,45 @@ import {
   serializeRecipe,
 } from "./serializers.ts";
 import { jsonResponse, normalizeName } from "./utils.ts";
+import type { HandlerExtra, InferSchema } from "./types.ts";
 
-function hasOwn(obj, key) {
+function hasOwn(obj: object, key: string | number | symbol): boolean {
   return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
-function findListByName(lists, name) {
-  const needle = normalizeName(name);
-  return lists.find((list) => normalizeName(list.name) === needle);
+function findBy<T extends object, K extends keyof T>(
+  collection: T[],
+  prop: K,
+  value: T[K] | undefined | null,
+): T | undefined {
+  if (value === undefined || value === null) {
+    return undefined;
+  }
+  return collection.find((item) => {
+    const candidate = item?.[prop];
+    if (typeof candidate === "string" && typeof value === "string") {
+      return normalizeName(candidate) === normalizeName(value);
+    }
+    return candidate === value;
+  });
 }
 
-function findItemByName(list, name) {
-  const needle = normalizeName(name);
-  return list.items.find((item) => normalizeName(item.name) === needle);
-}
-
-function findRecipeByName(recipes, name) {
-  const needle = normalizeName(name);
-  return recipes.find((recipe) => normalizeName(recipe.name) === needle);
-}
-
-async function handleListLists() {
-  const lists = await getLists();
+async function handleListLists(
+  _input: InferSchema<"listLists">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   return jsonResponse({ lists: lists.map(serializeList) });
 }
 
-async function handleListItems(input) {
-  const lists = await getLists();
+async function handleListItems(
+  input: InferSchema<"listItems">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   const list = input.listId
-    ? lists.find((entry) => entry.identifier === input.listId)
-    : findListByName(lists, input.listName);
+    ? findBy(lists, "identifier", input.listId)
+    : findBy(lists, "name", input.listName);
   if (!list) {
     throw new Error("List not found.");
   }
@@ -52,17 +63,20 @@ async function handleListItems(input) {
   });
 }
 
-async function handleAddItem(input) {
-  const lists = await getLists();
+async function handleAddItem(
+  input: InferSchema<"addItem">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   const list = input.listId
-    ? lists.find((entry) => entry.identifier === input.listId)
-    : findListByName(lists, input.listName);
+    ? findBy(lists, "identifier", input.listId)
+    : findBy(lists, "name", input.listName);
   if (!list) {
     throw new Error("List not found.");
   }
 
   const existing = input.reuseExisting
-    ? findItemByName(list, input.name)
+    ? findBy(list.items, "name", input.name)
     : null;
   if (existing) {
     if (input.quantity !== undefined) {
@@ -73,6 +87,7 @@ async function handleAddItem(input) {
     }
     existing.checked = input.checked;
     await existing.save();
+    invalidateListsCache(extra.sessionId);
     return jsonResponse({ item: serializeItem(existing), reused: true });
   }
 
@@ -85,21 +100,25 @@ async function handleAddItem(input) {
   });
 
   const saved = await list.addItem(item);
+  invalidateListsCache(extra.sessionId);
   return jsonResponse({ item: serializeItem(saved), reused: false });
 }
 
-async function handleUpdateItem(input) {
-  const lists = await getLists();
+async function handleUpdateItem(
+  input: InferSchema<"updateItem">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   const list = input.listId
-    ? lists.find((entry) => entry.identifier === input.listId)
-    : findListByName(lists, input.listName);
+    ? findBy(lists, "identifier", input.listId)
+    : findBy(lists, "name", input.listName);
   if (!list) {
     throw new Error("List not found.");
   }
 
   const item = input.itemId
-    ? list.items.find((entry) => entry.identifier === input.itemId)
-    : findItemByName(list, input.itemName);
+    ? findBy(list.items, "identifier", input.itemId)
+    : findBy(list.items, "name", input.itemName);
   if (!item) {
     throw new Error("Item not found.");
   }
@@ -118,43 +137,55 @@ async function handleUpdateItem(input) {
   }
 
   await item.save();
+  invalidateListsCache(extra.sessionId);
   return jsonResponse({ item: serializeItem(item) });
 }
 
-async function handleRemoveItem(input) {
-  const lists = await getLists();
+async function handleRemoveItem(
+  input: InferSchema<"removeItem">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   const list = input.listId
-    ? lists.find((entry) => entry.identifier === input.listId)
-    : findListByName(lists, input.listName);
+    ? findBy(lists, "identifier", input.listId)
+    : findBy(lists, "name", input.listName);
   if (!list) {
     throw new Error("List not found.");
   }
 
   const item = input.itemId
-    ? list.items.find((entry) => entry.identifier === input.itemId)
-    : findItemByName(list, input.itemName);
+    ? findBy(list.items, "identifier", input.itemId)
+    : findBy(list.items, "name", input.itemName);
   if (!item) {
     throw new Error("Item not found.");
   }
 
   await list.removeItem(item);
+  invalidateListsCache(extra.sessionId);
   return jsonResponse({ removed: serializeItem(item) });
 }
 
-async function handleUncheckAll(input) {
-  const lists = await getLists();
+async function handleUncheckAll(
+  input: InferSchema<"uncheckAll">,
+  extra: HandlerExtra,
+) {
+  const lists = await getListsForSession(extra.sessionId);
   const list = input.listId
-    ? lists.find((entry) => entry.identifier === input.listId)
-    : findListByName(lists, input.listName);
+    ? findBy(lists, "identifier", input.listId)
+    : findBy(lists, "name", input.listName);
   if (!list) {
     throw new Error("List not found.");
   }
   await list.uncheckAll();
+  invalidateListsCache(extra.sessionId);
   return jsonResponse({ list: serializeList(list), status: "ok" });
 }
 
-async function handleListRecipes(input) {
-  const recipes = await getRecipes();
+async function handleListRecipes(
+  input: InferSchema<"listRecipes">,
+  extra: HandlerExtra,
+) {
+  const recipes = await getRecipesForSession(extra.sessionId);
   let filtered = recipes;
   if (input.name) {
     const needle = normalizeName(input.name);
@@ -168,18 +199,24 @@ async function handleListRecipes(input) {
   return jsonResponse({ recipes: filtered.map(serializeRecipe) });
 }
 
-async function handleGetRecipe(input) {
-  const recipes = await getRecipes();
+async function handleGetRecipe(
+  input: InferSchema<"getRecipe">,
+  extra: HandlerExtra,
+) {
+  const recipes = await getRecipesForSession(extra.sessionId);
   const recipe = input.recipeId
-    ? recipes.find((entry) => entry.identifier === input.recipeId)
-    : findRecipeByName(recipes, input.recipeName);
+    ? findBy(recipes, "identifier", input.recipeId)
+    : findBy(recipes, "name", input.recipeName);
   if (!recipe) {
     throw new Error("Recipe not found.");
   }
   return jsonResponse({ recipe: serializeRecipe(recipe) });
 }
 
-async function handleCreateRecipe(input) {
+async function handleCreateRecipe(
+  input: InferSchema<"createRecipe">,
+  extra: HandlerExtra,
+) {
   const client = await getClient();
   const now = Date.now() / 1000;
   const recipe = await client.createRecipe({
@@ -200,14 +237,18 @@ async function handleCreateRecipe(input) {
   });
 
   await recipe.save();
+  invalidateRecipesCache(extra.sessionId);
   return jsonResponse({ recipe: serializeRecipe(recipe) });
 }
 
-async function handleUpdateRecipe(input) {
-  const recipes = await getRecipes();
+async function handleUpdateRecipe(
+  input: InferSchema<"updateRecipe">,
+  extra: HandlerExtra,
+) {
+  const recipes = await getRecipesForSession(extra.sessionId);
   const recipe = input.recipeId
-    ? recipes.find((entry) => entry.identifier === input.recipeId)
-    : findRecipeByName(recipes, input.recipeName);
+    ? findBy(recipes, "identifier", input.recipeId)
+    : findBy(recipes, "name", input.recipeName);
   if (!recipe) {
     throw new Error("Recipe not found.");
   }
@@ -264,24 +305,32 @@ async function handleUpdateRecipe(input) {
   }
 
   await recipe.save();
+  invalidateRecipesCache(extra.sessionId);
   return jsonResponse({ recipe: serializeRecipe(recipe) });
 }
 
-async function handleDeleteRecipe(input) {
-  const recipes = await getRecipes();
+async function handleDeleteRecipe(
+  input: InferSchema<"deleteRecipe">,
+  extra: HandlerExtra,
+) {
+  const recipes = await getRecipesForSession(extra.sessionId);
   const recipe = input.recipeId
-    ? recipes.find((entry) => entry.identifier === input.recipeId)
-    : findRecipeByName(recipes, input.recipeName);
+    ? findBy(recipes, "identifier", input.recipeId)
+    : findBy(recipes, "name", input.recipeName);
   if (!recipe) {
     throw new Error("Recipe not found.");
   }
   await recipe.delete();
+  invalidateRecipesCache(extra.sessionId);
   return jsonResponse({
     deleted: { id: recipe.identifier, name: recipe.name },
   });
 }
 
-async function handleMealPlanEvents(input) {
+async function handleMealPlanEvents(
+  input: InferSchema<"mealPlanEvents">,
+  _extra: HandlerExtra,
+) {
   const events = await getMealPlanEvents();
   let filtered = events;
   if (input.startDate) {
@@ -297,14 +346,20 @@ async function handleMealPlanEvents(input) {
   return jsonResponse({ events: filtered.map(serializeMealPlanEvent) });
 }
 
-async function handleMealPlanLabels() {
+async function handleMealPlanLabels(
+  _input: InferSchema<"mealPlanLabels">,
+  _extra: HandlerExtra,
+) {
   await getMealPlanEvents();
   const client = await getClient();
   const labels = client.mealPlanningCalendarEventLabels ?? [];
   return jsonResponse({ labels: labels.map(serializeMealPlanLabel) });
 }
 
-async function handleCreateMealPlanEvent(input) {
+async function handleCreateMealPlanEvent(
+  input: InferSchema<"createMealPlanEvent">,
+  _extra: HandlerExtra,
+) {
   const client = await getClient();
   const event = await client.createEvent({
     date: input.date,
@@ -319,7 +374,10 @@ async function handleCreateMealPlanEvent(input) {
   return jsonResponse({ event: serializeMealPlanEvent(event) });
 }
 
-async function handleDeleteMealPlanEvent(input) {
+async function handleDeleteMealPlanEvent(
+  input: InferSchema<"deleteMealPlanEvent">,
+  _extra: HandlerExtra,
+) {
   const events = await getMealPlanEvents();
   const event = events.find((entry) => entry.identifier === input.eventId);
   if (!event) {
