@@ -31,7 +31,9 @@ try {
   process.exit(1);
 }
 
-const app = createMcpExpressApp();
+const app = createMcpExpressApp({
+  allowedHosts: ["anylist-mcp", "localhost", "127.0.0.1"],
+});
 
 app.post("/mcp", async (req, res) => {
   const server = createServer();
