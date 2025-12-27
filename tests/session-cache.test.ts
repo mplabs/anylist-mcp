@@ -35,4 +35,36 @@ describe("SessionCache", () => {
     cache.invalidate("session-a", "lists");
     expect(cache.get("session-a", "lists")).toBeUndefined();
   });
+
+  test("does nothing when ttl is disabled", () => {
+    const cache = new SessionCache(0);
+
+    cache.set("session-a", "lists", ["milk"]);
+    expect(cache.get("session-a", "lists")).toBeUndefined();
+    cache.invalidate("session-a", "lists");
+  });
+
+  test("invalidates all entries for a session", () => {
+    const cache = new SessionCache(1000);
+
+    cache.set("session-a", "lists", ["bread"]);
+    cache.set("session-a", "recipes", ["toast"]);
+    cache.invalidate("session-a");
+    expect(cache.get("session-a", "lists")).toBeUndefined();
+    expect(cache.get("session-a", "recipes")).toBeUndefined();
+  });
+
+  test("ignores invalidation for missing session entries", () => {
+    const cache = new SessionCache(1000);
+
+    cache.invalidate("missing-session", "lists");
+    expect(cache.get("missing-session", "lists")).toBeUndefined();
+  });
+
+  test("uses the default session id when none is provided", () => {
+    const cache = new SessionCache(1000);
+
+    cache.set(undefined, "lists", ["apples"]);
+    expect(cache.get(undefined, "lists")).toEqual(["apples"]);
+  });
 });

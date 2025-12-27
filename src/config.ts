@@ -1,4 +1,4 @@
-const REQUIRED_ENV = ["ANYLIST_EMAIL", "ANYLIST_PASSWORD"];
+const REQUIRED_ENV = ["ANYLIST_EMAIL", "ANYLIST_PASSWORD"] as const;
 
 function requireEnv() {
   const missing = REQUIRED_ENV.filter((key) => !process.env[key]);
